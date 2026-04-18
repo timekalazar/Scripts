@@ -1,0 +1,199 @@
+-- =============================================
+-- Blox Fruits Ken Haki Auto-Farm (ULTRA STRIPPED TEST VERSION)
+-- =============================================
+-- ONLY core flow (no focus pause, no extra fluff):
+-- 1. Wait for full load + team menu (fixes re-execution)
+-- 2. Select Marines
+-- 3. TP to fixed trainee spawn
+-- 4. Lock + strong smooth glue/stick
+-- 5. Toggle Ken Haki
+-- 6. Farm until dodges exactly = 0
+-- 7. Safety lift → minimal rejoin queue → Teleport
+-- Clean, efficient, reliable, no fragile timings.
+-- =============================================
+
+print("✅ ULTRA-STRIPPED Ken Haki Auto-Farm EXECUTED")
+
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- ===================== CORE SETTINGS =====================
+local TELEPORT_OFFSET = CFrame.new(0, 0, -4)
+local STICK_STRENGTH = 0.96
+local SAFETY_LIFT = 60
+
+local TRAINEE_SPAWN_CFRAME = CFrame.new(-2815.68115, 43.2066383, 2076.00244) * CFrame.fromOrientation(0, math.rad(13), 0)
+local SCRIPT_URL = "https://raw.githubusercontent.com/timekalazar/auto-observation/refs/heads/main/script.lua"
+-- ========================================================
+
+local selectedNPC = nil
+local stickConnection = nil
+
+-- ===================== WAIT FOR FULL LOAD + TEAM MENU =====================
+local function waitForFullLoad()
+    print("⏳ Waiting for full game load + team menu...")
+    if not game:IsLoaded() then game.Loaded:Wait() end
+    
+    local start = tick()
+    while tick() - start < 30 do
+        local gui = playerGui:FindFirstChild("Main (minimal)") or playerGui:FindFirstChild("Main")
+        if gui and gui:FindFirstChild("ChooseTeam") then
+            print("✅ Fully loaded + team menu ready")
+            return
+        end
+        RunService.Heartbeat:Wait()
+    end
+    print("⚠️ Load timeout - proceeding")
+end
+
+-- ===================== CHARACTER =====================
+local function getCharacter()
+    local char = player.Character or player.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart", 15)
+    return char, hrp
+end
+
+-- ===================== DODGE (exact 0 only) =====================
+local function getDodgeCount()
+    local main = playerGui:FindFirstChild("Main", true)
+    if not main then return 0 end
+    local bottom = main:FindFirstChild("BottomHUDList", true)
+    if not bottom then return 0 end
+    local universal = bottom:FindFirstChild("UniversalContextButtons", true)
+    if not universal then return 0 end
+    local kenFrame = universal:FindFirstChild("BoundActionKen")
+    if not kenFrame then return 0 end
+    local label = kenFrame:FindFirstChild("DodgesLeftLabel")
+    if not label then return 0 end
+
+    local text = label.Text or ""
+    local num = tonumber(text:match("([%d%.]+)/")) or 0
+    return num
+end
+
+-- ===================== TRAINEE ONLY =====================
+local function isTrainee(enemy)
+    return enemy and enemy.Name and enemy.Name:lower():find("trainee") ~= nil
+end
+
+local function findClosestTrainee(hrp)
+    local closest, dist = nil, math.huge
+    for _, enemy in ipairs(workspace.Enemies:GetChildren()) do
+        if isTrainee(enemy) then
+            local root = enemy:FindFirstChild("HumanoidRootPart")
+            local hum = enemy:FindFirstChild("Humanoid")
+            if root and hum and hum.Health > 0 then
+                local d = (root.Position - hrp.Position).Magnitude
+                if d < dist then
+                    dist = d
+                    closest = enemy
+                end
+            end
+        end
+    end
+    return closest
+end
+
+-- ===================== TEAM & KEN =====================
+local function selectTeam()
+    local gui = playerGui:FindFirstChild("Main (minimal)") or playerGui:FindFirstChild("Main")
+    if gui and gui:FindFirstChild("ChooseTeam") then
+        local btn = gui.ChooseTeam.Container.Marines.Frame:FindFirstChild("TextButton")
+        if btn then firesignal(btn.Activated) end
+    end
+end
+
+local function turnOnKen()
+    for _ = 1, 10 do
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        RunService.Heartbeat:Wait()
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        RunService.Heartbeat:Wait()
+    end
+end
+
+-- ===================== STRONG SMOOTH STICK =====================
+local function startStick(hrp)
+    if stickConnection then stickConnection:Disconnect() end
+    stickConnection = RunService.Heartbeat:Connect(function()
+        if not selectedNPC then return end
+        local root = selectedNPC:FindFirstChild("HumanoidRootPart")
+        local hum = selectedNPC:FindFirstChild("Humanoid")
+        if root and hum and hum.Health > 0 then
+            hrp.CFrame = hrp.CFrame:Lerp(root.CFrame * TELEPORT_OFFSET, STICK_STRENGTH)
+        end
+    end)
+end
+
+-- ===================== SAFETY & REJOIN (minimal) =====================
+local function shortSafetyLift(hrp)
+    local safe = hrp.CFrame * CFrame.new(0, SAFETY_LIFT, 0)
+    local tween = TweenService:Create(hrp, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {CFrame = safe})
+    tween:Play()
+    tween.Completed:Wait()
+end
+
+local function setupRejoin()
+    local queueCode = [[ 
+        task.wait(8)
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/timekalazar/auto-observation/refs/heads/main/script.lua", true))()
+    ]]
+    if typeof(queue_on_teleport) == "function" then
+        pcall(queue_on_teleport, queueCode)
+    else
+        pcall(function() TeleportService:SetTeleportSetting("queue_on_teleport", queueCode) end)
+    end
+end
+
+-- ===================== MAIN (clean stripped loop) =====================
+waitForFullLoad()
+
+while true do
+    print("=== NEW CYCLE ===")
+
+    selectTeam()
+    local _, hrp = getCharacter()
+
+    -- TP to fixed spawn
+    hrp.CFrame = TRAINEE_SPAWN_CFRAME
+    RunService.Heartbeat:Wait() -- one frame for spawn
+
+    selectedNPC = findClosestTrainee(hrp)
+    if not selectedNPC then
+        repeat RunService.Heartbeat:Wait() selectedNPC = findClosestTrainee(hrp) until selectedNPC
+    end
+
+    print("✅ Locked on", selectedNPC.Name)
+    hrp.CFrame = selectedNPC:WaitForChild("HumanoidRootPart").CFrame * TELEPORT_OFFSET
+
+    startStick(hrp)
+    turnOnKen()
+
+    print("🌟 Farming...")
+
+    while getDodgeCount() > 0 do
+        if not selectedNPC or not selectedNPC.Parent or (selectedNPC:FindFirstChild("Humanoid") and selectedNPC.Humanoid.Health <= 0) then
+            selectedNPC = findClosestTrainee(hrp)
+        end
+        RunService.Heartbeat:Wait()
+    end
+
+    print("✅ Dodges = 0 → Rejoin")
+
+    if stickConnection then
+        stickConnection:Disconnect()
+        stickConnection = nil
+    end
+
+    setupRejoin()
+    shortSafetyLift(hrp)
+    TeleportService:Teleport(game.PlaceId, player)
+
+    task.wait(10)
+end
